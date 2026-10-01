@@ -21,7 +21,7 @@ public class Step {
         this.name = Objects.requireNonNull(name, "name must not be null");
         this.order = order;
         this.actionType = Objects.requireNonNull(actionType, "actionType must not be null");
-        this.config = Map.copyOf(config); // defensive copy, immutable
+        this.config = Map.copyOf(config);
         if (maxRetries < 0) {
             throw new IllegalArgumentException("maxRetries must be >= 0");
         }
