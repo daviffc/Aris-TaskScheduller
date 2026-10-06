@@ -61,7 +61,7 @@ public class WorkflowScheduller {
     private void runLoop() {
         while (running) {
             if (isEmpty()) {
-                sleepQuietly(500);
+                ThreadUtils.sleepQuietly(500);
                 continue;
             }
 
@@ -74,17 +74,10 @@ public class WorkflowScheduller {
                 due.getTrigger().advanceNextRunTime();
                 queue.add(due);
             } else {
-                sleepQuietly(Math.min(millisUntilDue, 500));
+                ThreadUtils.sleepQuietly(Math.min(millisUntilDue, 500));
             }
         }
     }
 
-    private void sleepQuietly(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
 
 }
