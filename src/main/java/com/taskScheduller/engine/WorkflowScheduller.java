@@ -1,5 +1,6 @@
 package com.taskScheduller.engine;
 
+import com.taskScheduller.domain.Execution;
 import com.taskScheduller.domain.Workflow;
 import com.taskScheduller.domain.enums.TriggerType;
 import java.time.Duration;
@@ -11,12 +12,13 @@ public class WorkflowScheduller {
     private final PriorityQueue<Workflow> queue;
     private volatile boolean running = false;
     private Thread worker;
+    private WorkflowExecutor executor;
 
-    public WorkflowScheduller() {
+    public WorkflowScheduller(WorkflowExecutor executor) {
         this.queue = new PriorityQueue<>(
                 (a,b) -> a.getTrigger().getNextRunTime().compareTo(b.getTrigger().getNextRunTime())
         );
-
+        this.executor = executor;
     }
 
     public void schedule(Workflow workflow) {
@@ -70,7 +72,8 @@ public class WorkflowScheduller {
 
             if (millisUntilDue <= 0) {
                 Workflow due = pollNext();
-                System.out.println("Running workflow: " + due.getName());
+                Execution execution = executor.execute(due);
+                System.out.println("Execution " + execution.getId() + " finished with status: " + execution.getStatus());
                 due.getTrigger().advanceNextRunTime();
                 queue.add(due);
             } else {
@@ -78,6 +81,4 @@ public class WorkflowScheduller {
             }
         }
     }
-
-
 }
