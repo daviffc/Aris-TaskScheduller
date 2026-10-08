@@ -1,6 +1,7 @@
 package com.taskScheduller;
 
 import com.taskScheduller.actions.LogMessageExecutor;
+import com.taskScheduller.actions.HttpRequestExecutor;
 import com.taskScheduller.domain.*;
 import com.taskScheduller.domain.enums.ActionType;
 import com.taskScheduller.engine.WorkflowExecutor;
@@ -12,12 +13,16 @@ import java.util.Map;
 public class Main {
     public static void main(String[] args) throws InterruptedException {
 
-        Workflow workflow = new Workflow("Periodic greeter", "Says hello every 3 seconds", Trigger.cron(3));
+        Workflow workflow = new Workflow("Multi-step workflow", "Logs and makes HTTP request", Trigger.cron(5));
         workflow.addStep(new Step("Greet", 1, ActionType.LOG_MESSAGE,
-                Map.of("message", "Hello from scheduled execution!"), 0, 1000));
+                Map.of("message", "Starting workflow..."), 0, 1000));
+        workflow.addStep(new Step("Check status", 2, ActionType.HTTP_REQUEST,
+                Map.of("url", "https://httpbin.org/status/200", "method", "GET"), 2, 1000));
 
-
-        WorkflowExecutor executor = new WorkflowExecutor(List.of(new LogMessageExecutor()));
+        WorkflowExecutor executor = new WorkflowExecutor(List.of(
+                new LogMessageExecutor(),
+                new HttpRequestExecutor()
+        ));
         WorkflowScheduller scheduler = new WorkflowScheduller(executor);
 
         scheduler.schedule(workflow);
