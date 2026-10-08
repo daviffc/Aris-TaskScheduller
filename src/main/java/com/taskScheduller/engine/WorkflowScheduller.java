@@ -6,8 +6,11 @@ import com.taskScheduller.domain.enums.TriggerType;
 import java.time.Duration;
 import java.time.Instant;
 
+import org.springframework.stereotype.Component;
+
 import java.util.PriorityQueue;
 
+@Component
 public class WorkflowScheduller {
     private final PriorityQueue<Workflow> queue;
     private volatile boolean running = false;

@@ -2,9 +2,10 @@ package com.taskScheduller.actions;
 
 import com.taskScheduller.domain.ActionExecutor;
 import com.taskScheduller.domain.enums.ActionType;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
-
+@Component
 public class LogMessageExecutor implements ActionExecutor {
 
     @Override

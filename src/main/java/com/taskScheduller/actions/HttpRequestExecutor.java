@@ -7,7 +7,9 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Map;
+import org.springframework.stereotype.Component;
 
+@Component
 public class HttpRequestExecutor implements ActionExecutor {
 
     @Override
