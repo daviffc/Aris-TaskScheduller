@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: aris-postgres
+    environment:
+      POSTGRES_DB: aris
+      POSTGRES_USER: aris
+      POSTGRES_PASSWORD: aris_dev_password
+    ports:
+      - "5455:5432"
+    volumes:
+      - aris-pgdata:/var/lib/postgresql/data
+
+volumes:
+  aris-pgdata:
