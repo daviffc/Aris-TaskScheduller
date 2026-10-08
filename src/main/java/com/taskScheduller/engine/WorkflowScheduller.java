@@ -6,6 +6,8 @@ import com.taskScheduller.domain.enums.TriggerType;
 import java.time.Duration;
 import java.time.Instant;
 
+import jakarta.annotation.PreDestroy;
+
 import org.springframework.stereotype.Component;
 
 import java.util.PriorityQueue;
@@ -56,7 +58,9 @@ public class WorkflowScheduller {
         worker.start();
     }
 
+    @PreDestroy
     public void stop() {
+        System.out.println("Scheduler stopping...");
         running = false;
         if (worker != null) {
             worker.interrupt();
