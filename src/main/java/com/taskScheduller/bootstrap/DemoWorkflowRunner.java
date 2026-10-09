@@ -5,6 +5,7 @@ import com.taskScheduller.domain.Trigger;
 import com.taskScheduller.domain.Workflow;
 import com.taskScheduller.domain.enums.ActionType;
 import com.taskScheduller.engine.WorkflowScheduller;
+import com.taskScheduller.repository.WorkflowRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -14,9 +15,11 @@ import java.util.Map;
 public class DemoWorkflowRunner implements CommandLineRunner {
 
     private final WorkflowScheduller scheduler;
+    private final WorkflowRepository workflowRepository;
 
-    public DemoWorkflowRunner(WorkflowScheduller scheduler) {
+    public DemoWorkflowRunner(WorkflowScheduller scheduler, WorkflowRepository workflowRepository) {
         this.scheduler = scheduler;
+        this.workflowRepository = workflowRepository;
     }
 
     @Override
@@ -27,6 +30,7 @@ public class DemoWorkflowRunner implements CommandLineRunner {
         workflow.addStep(new Step("Check status", 2, ActionType.HTTP_REQUEST,
                 Map.of("url", "https://httpbin.org/status/200", "method", "GET"), 2, 1000));
 
+        workflowRepository.save(workflow);
         scheduler.schedule(workflow);
         scheduler.start();
     }

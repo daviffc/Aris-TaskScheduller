@@ -10,6 +10,8 @@ import jakarta.annotation.PreDestroy;
 
 import org.springframework.stereotype.Component;
 
+import com.taskScheduller.repository.ExecutionRepository;
+
 import java.util.PriorityQueue;
 
 @Component
@@ -17,15 +19,17 @@ public class WorkflowScheduller {
     private final PriorityQueue<Workflow> queue;
     private volatile boolean running = false;
     private Thread worker;
-    private WorkflowExecutor executor;
+    private final WorkflowExecutor executor;
+    private final ExecutionRepository executionRepository;
 
-    public WorkflowScheduller(WorkflowExecutor executor) {
+
+    public WorkflowScheduller(WorkflowExecutor executor, ExecutionRepository executionRepository) {
         this.queue = new PriorityQueue<>(
                 (a,b) -> a.getTrigger().getNextRunTime().compareTo(b.getTrigger().getNextRunTime())
         );
         this.executor = executor;
+        this.executionRepository = executionRepository;
     }
-
     public void schedule(Workflow workflow) {
         if (workflow.getTrigger().getType() != TriggerType.CRON) {
             throw new IllegalArgumentException("cron trigger type must be CRON");
@@ -80,7 +84,9 @@ public class WorkflowScheduller {
             if (millisUntilDue <= 0) {
                 Workflow due = pollNext();
                 Execution execution = executor.execute(due);
-                System.out.println("Execution " + execution.getId() + " finished with status: " + execution.getStatus());
+                executionRepository.save(execution);
+                System.out.println("Execution " + execution.getId() + " finished with status: " + execution.getStatus()
+                +"(stored for this workflow: "+ executionRepository.findByWorkflowId(due.getId()).size()+")");
                 due.getTrigger().advanceNextRunTime();
                 queue.add(due);
             } else {
