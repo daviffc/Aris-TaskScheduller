@@ -14,9 +14,11 @@ import com.taskScheduller.repository.ExecutionRepository;
 
 import java.util.PriorityQueue;
 
+import java.util.concurrent.PriorityBlockingQueue;
+
 @Component
 public class WorkflowScheduller {
-    private final PriorityQueue<Workflow> queue;
+    private final PriorityBlockingQueue<Workflow> queue;
     private volatile boolean running = false;
     private Thread worker;
     private final WorkflowExecutor executor;
@@ -24,7 +26,8 @@ public class WorkflowScheduller {
 
 
     public WorkflowScheduller(WorkflowExecutor executor, ExecutionRepository executionRepository) {
-        this.queue = new PriorityQueue<>(
+        this.queue = new PriorityBlockingQueue<>(
+                11,
                 (a,b) -> a.getTrigger().getNextRunTime().compareTo(b.getTrigger().getNextRunTime())
         );
         this.executor = executor;
