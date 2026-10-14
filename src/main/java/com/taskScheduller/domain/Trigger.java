@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 public class Trigger {
+
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) return false;
@@ -20,7 +21,7 @@ public class Trigger {
 
     private final TriggerType type;
     private final long intervalSeconds;
-    private Instant nextRunTime;
+    private volatile Instant nextRunTime;
 
     private Trigger(TriggerType type, long intervalSeconds, Instant nextRunTime) {
         this.type = type;
