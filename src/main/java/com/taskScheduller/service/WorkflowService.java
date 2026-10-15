@@ -2,25 +2,37 @@ package com.taskScheduller.service;
 
 import com.taskScheduller.api.CreateWorkflowRequest;
 import com.taskScheduller.api.StepRequest;
+import com.taskScheduller.domain.Execution;
 import com.taskScheduller.domain.Step;
 import com.taskScheduller.domain.Trigger;
 import com.taskScheduller.domain.Workflow;
 import com.taskScheduller.domain.enums.TriggerType;
+import com.taskScheduller.engine.WorkflowExecutor;
 import com.taskScheduller.engine.WorkflowScheduller;
+import com.taskScheduller.repository.ExecutionRepository;
 import com.taskScheduller.repository.WorkflowRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+
 
 @Service
 public class WorkflowService {
 
     private final WorkflowRepository workflowRepository;
+    private final ExecutionRepository executionRepository;
+    private final WorkflowExecutor executor;
+    private final ExecutorService executionPool;
     private final WorkflowScheduller scheduler;
 
-    public WorkflowService(WorkflowRepository workflowRepository, WorkflowScheduller scheduler) {
+    public WorkflowService(WorkflowRepository workflowRepository, WorkflowScheduller scheduler, ExecutionRepository executionRepository, WorkflowExecutor executor, ExecutorService executionPool) {
         this.workflowRepository = workflowRepository;
         this.scheduler = scheduler;
+        this.executionRepository = executionRepository;
+        this.executor = executor;
+        this.executionPool = executionPool;
     }
 
     public Workflow create(CreateWorkflowRequest request) {
@@ -54,5 +66,24 @@ public class WorkflowService {
             scheduler.schedule(workflow);
         }
         return workflow;
+    }
+
+    public Optional<Execution> trigger(String workflowId){
+        return workflowRepository.findById(workflowId).map(workflow -> {
+            Execution execution = new Execution(workflow.getId());
+            executionRepository.save(execution);
+
+            executionPool.submit(()->{
+                System.out.println("Running execution " + execution.getId()
+                        + " on thread " + Thread.currentThread().getName());
+                try {
+                    executor.execute(workflow, execution);
+                } catch (Exception e) {
+                    execution.markFailed();
+                    System.err.println("Execution " + execution.getId() + " crashed: " + e);
+                }
+            });
+            return execution;
+        });
     }
 }

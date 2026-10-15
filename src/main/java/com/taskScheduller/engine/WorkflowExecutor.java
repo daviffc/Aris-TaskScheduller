@@ -55,9 +55,10 @@ public class WorkflowExecutor {
     }
 
     public Execution execute(Workflow workflow) {
-        Execution execution = new Execution(workflow.getId());
-        execution.markRunning();
+        return execute(workflow, new Execution(workflow.getId()));
+    }
 
+    public Execution execute(Workflow workflow, Execution execution) {
         boolean failed = false;
 
         for (Step step : workflow.getSteps()) {
