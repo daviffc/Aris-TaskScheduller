@@ -28,11 +28,12 @@ public class WorkflowScheduller {
     public WorkflowScheduller(WorkflowExecutor executor, ExecutionRepository executionRepository) {
         this.queue = new PriorityBlockingQueue<>(
                 11,
-                (a,b) -> a.getTrigger().getNextRunTime().compareTo(b.getTrigger().getNextRunTime())
+                (a, b) -> a.getTrigger().getNextRunTime().compareTo(b.getTrigger().getNextRunTime())
         );
         this.executor = executor;
         this.executionRepository = executionRepository;
     }
+
     public void schedule(Workflow workflow) {
         if (workflow.getTrigger().getType() != TriggerType.CRON) {
             throw new IllegalArgumentException("cron trigger type must be CRON");
@@ -86,12 +87,17 @@ public class WorkflowScheduller {
 
             if (millisUntilDue <= 0) {
                 Workflow due = pollNext();
-                Execution execution = executor.execute(due);
-                executionRepository.save(execution);
-                System.out.println("Execution " + execution.getId() + " finished with status: " + execution.getStatus()
-                +"(stored for this workflow: "+ executionRepository.findByWorkflowId(due.getId()).size()+")");
-                due.getTrigger().advanceNextRunTime();
-                queue.add(due);
+                try {
+                    Execution execution = executor.execute(due);
+                    executionRepository.save(execution);
+                    System.out.println("Execution " + execution.getId() + " finished with status: " + execution.getStatus()
+                            + " (stored for this workflow: " + executionRepository.findByWorkflowId(due.getId()).size() + ")");
+                } catch (Exception e) {
+                    System.err.println("Scheduled run of workflow " + due.getId() + " crashed: " + e);
+                } finally {
+                    due.getTrigger().advanceNextRunTime();
+                    queue.add(due);
+                }
             } else {
                 ThreadUtils.sleepQuietly(Math.min(millisUntilDue, 500));
             }
