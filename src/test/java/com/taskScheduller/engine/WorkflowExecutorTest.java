@@ -1,6 +1,8 @@
 package com.taskScheduller.engine;
 
+import com.taskScheduller.domain.ActionExecutor;
 import com.taskScheduller.domain.Execution;
+import com.taskScheduller.domain.ExecutionLog;
 import com.taskScheduller.domain.Step;
 import com.taskScheduller.domain.Trigger;
 import com.taskScheduller.domain.Workflow;
@@ -9,29 +11,170 @@ import com.taskScheduller.domain.enums.ExecutionStatus;
 import com.taskScheduller.domain.enums.StepStatus;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorkflowExecutorTest {
 
+    private Step step(String name, int order, ActionType type, int maxRetries) {
+        return new Step(name, order, type, Map.of(), maxRetries, 0);
+    }
+
+    private Workflow workflowWith(Step... steps) {
+        Workflow workflow = new Workflow("test", "", Trigger.manual());
+        for (Step s : steps) {
+            workflow.addStep(s);
+        }
+        return workflow;
+    }
+
     @Test
     void singleStepThatSucceeds_marksExecutionSucceeded() {
-        // given
         FakeActionExecutor fake = new FakeActionExecutor(ActionType.LOG_MESSAGE, 0);
         WorkflowExecutor executor = new WorkflowExecutor(List.of(fake));
 
-        Workflow workflow = new Workflow("test", "", Trigger.manual());
-        workflow.addStep(new Step("only step", 1, ActionType.LOG_MESSAGE, Map.of(), 0, 0));
+        Execution execution = executor.execute(workflowWith(step("only", 1, ActionType.LOG_MESSAGE, 0)));
 
-        // when
-        Execution execution = executor.execute(workflow);
-
-        // then
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(execution.getEndTime()).isNotNull();
         assertThat(execution.getLogs()).hasSize(1);
         assertThat(execution.getLogs().get(0).getStatus()).isEqualTo(StepStatus.SUCCEEDED);
         assertThat(fake.getCalls()).isEqualTo(1);
+    }
+
+    @Test
+    void execution_isRunning_whileAStepIsExecuting() {
+        Workflow workflow = workflowWith(step("only", 1, ActionType.LOG_MESSAGE, 0));
+        Execution execution = new Execution(workflow.getId());
+        AtomicReference<ExecutionStatus> statusSeenByStep = new AtomicReference<>();
+
+        ActionExecutor spy = new ActionExecutor() {
+            @Override
+            public ActionType supports() {
+                return ActionType.LOG_MESSAGE;
+            }
+
+            @Override
+            public void execute(Map<String, String> config) {
+                statusSeenByStep.set(execution.getStatus());
+            }
+        };
+
+        new WorkflowExecutor(List.of(spy)).execute(workflow, execution);
+
+        assertThat(statusSeenByStep.get()).isEqualTo(ExecutionStatus.RUNNING);
+    }
+
+    @Test
+    void stepFailingOnce_isRetriedAndThenSucceeds() {
+        FakeActionExecutor fake = new FakeActionExecutor(ActionType.LOG_MESSAGE, 1);
+        WorkflowExecutor executor = new WorkflowExecutor(List.of(fake));
+
+        Execution execution = executor.execute(workflowWith(step("flaky", 1, ActionType.LOG_MESSAGE, 2)));
+
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(execution.getLogs()).extracting(ExecutionLog::getStatus)
+                .containsExactly(StepStatus.RETRYING, StepStatus.SUCCEEDED);
+        assertThat(execution.getLogs()).extracting(ExecutionLog::getAttemptNumber)
+                .containsExactly(1, 2);
+        assertThat(fake.getCalls()).isEqualTo(2);
+    }
+
+    @Test
+    void retriesExhausted_marksExecutionFailed() {
+        FakeActionExecutor fake = new FakeActionExecutor(ActionType.LOG_MESSAGE, 99);
+        WorkflowExecutor executor = new WorkflowExecutor(List.of(fake));
+
+        Execution execution = executor.execute(workflowWith(step("broken", 1, ActionType.LOG_MESSAGE, 2)));
+
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(execution.getLogs()).extracting(ExecutionLog::getStatus)
+                .containsExactly(StepStatus.RETRYING, StepStatus.RETRYING, StepStatus.FAILED);
+        assertThat(fake.getCalls()).isEqualTo(3); // original attempt + 2 retries
+    }
+
+    @Test
+    void zeroRetries_failsOnFirstError() {
+        FakeActionExecutor fake = new FakeActionExecutor(ActionType.LOG_MESSAGE, 99);
+        WorkflowExecutor executor = new WorkflowExecutor(List.of(fake));
+
+        Execution execution = executor.execute(workflowWith(step("once", 1, ActionType.LOG_MESSAGE, 0)));
+
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(execution.getLogs()).extracting(ExecutionLog::getStatus)
+                .containsExactly(StepStatus.FAILED);
+        assertThat(fake.getCalls()).isEqualTo(1);
+    }
+
+    @Test
+    void afterAFailure_remainingStepsAreSkippedAndNeverRun() {
+        FakeActionExecutor failing = new FakeActionExecutor(ActionType.LOG_MESSAGE, 99);
+        FakeActionExecutor neverCalled = new FakeActionExecutor(ActionType.HTTP_REQUEST, 0);
+        WorkflowExecutor executor = new WorkflowExecutor(List.of(failing, neverCalled));
+
+        Execution execution = executor.execute(workflowWith(
+                step("a", 1, ActionType.LOG_MESSAGE, 0),
+                step("b", 2, ActionType.HTTP_REQUEST, 0)));
+
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(execution.getLogs()).extracting(ExecutionLog::getStatus)
+                .containsExactly(StepStatus.FAILED, StepStatus.SKIPPED);
+        assertThat(neverCalled.getCalls()).isZero();
+    }
+
+    @Test
+    void missingExecutor_failsTheStepWithAClearMessage() {
+        WorkflowExecutor executor = new WorkflowExecutor(List.of());
+
+        Execution execution = executor.execute(workflowWith(step("orphan", 1, ActionType.LOG_MESSAGE, 0)));
+
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(execution.getLogs()).hasSize(1);
+        assertThat(execution.getLogs().get(0).getStatus()).isEqualTo(StepStatus.FAILED);
+        assertThat(execution.getLogs().get(0).getMessage()).contains("No executor registered");
+    }
+
+    @Test
+    void stepsRunByOrderField_notByInsertionOrder() {
+        List<String> seen = new ArrayList<>();
+        ActionExecutor recorder = new ActionExecutor() {
+            @Override
+            public ActionType supports() {
+                return ActionType.LOG_MESSAGE;
+            }
+
+            @Override
+            public void execute(Map<String, String> config) {
+                seen.add(config.get("id"));
+            }
+        };
+        Workflow workflow = new Workflow("test", "", Trigger.manual());
+        workflow.addStep(new Step("second", 2, ActionType.LOG_MESSAGE, Map.of("id", "second"), 0, 0));
+        workflow.addStep(new Step("first", 1, ActionType.LOG_MESSAGE, Map.of("id", "first"), 0, 0));
+
+        new WorkflowExecutor(List.of(recorder)).execute(workflow);
+
+        assertThat(seen).containsExactly("first", "second");
+    }
+
+    @Test
+    void workflowWithoutSteps_succeedsWithNoLogs() {
+        Execution execution = new WorkflowExecutor(List.of()).execute(workflowWith());
+
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(execution.getLogs()).isEmpty();
+    }
+
+    @Test
+    void execute_createsAnExecutionLinkedToTheWorkflow() {
+        Workflow workflow = workflowWith();
+
+        Execution execution = new WorkflowExecutor(List.of()).execute(workflow);
+
+        assertThat(execution.getWorkflowId()).isEqualTo(workflow.getId());
     }
 }
