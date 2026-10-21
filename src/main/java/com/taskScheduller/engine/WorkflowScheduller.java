@@ -3,6 +3,7 @@ package com.taskScheduller.engine;
 
 import com.taskScheduller.domain.Execution;
 import com.taskScheduller.domain.Workflow;
+import com.taskScheduller.domain.enums.ExecutionStatus;
 import com.taskScheduller.domain.enums.TriggerType;
 import com.taskScheduller.repository.ExecutionRepository;
 import com.taskScheduller.repository.WorkflowRepository;
@@ -51,7 +52,9 @@ public class WorkflowScheduller {
 
     public void schedule(Workflow workflow) {
         if (workflow.getTrigger().getType() != TriggerType.CRON) {
-            throw new IllegalArgumentException("Trigger type must be CRON");
+            throw new IllegalArgumentException(
+                    "Trigger type must be CRON"
+            );
         }
 
         if (!workflow.isEnabled()) {
@@ -83,7 +86,12 @@ public class WorkflowScheduller {
         }
 
         running = true;
-        worker = new Thread(this::runLoop, "aris-workflow-scheduler");
+
+        worker = new Thread(
+                this::runLoop,
+                "aris-workflow-scheduler"
+        );
+
         worker.start();
     }
 
@@ -108,6 +116,7 @@ public class WorkflowScheduller {
 
         if (currentWorker != null
                 && currentWorker != Thread.currentThread()) {
+
             try {
                 currentWorker.join(30000);
             } catch (InterruptedException e) {
@@ -137,7 +146,9 @@ public class WorkflowScheduller {
             ).toMillis();
 
             if (millisUntilDue > 0) {
-                ThreadUtils.sleepQuietly(Math.min(millisUntilDue, 500));
+                ThreadUtils.sleepQuietly(
+                        Math.min(millisUntilDue, 500)
+                );
                 continue;
             }
 
@@ -147,27 +158,49 @@ public class WorkflowScheduller {
                 continue;
             }
 
+            Execution execution = new Execution(due.getId());
+
             try {
-                Execution execution = executor.execute(due);
+                executionRepository.save(execution);
 
-                if (running) {
-                    executionRepository.save(execution);
+                execution.markRunning();
+                executionRepository.save(execution);
 
-                    System.out.println(
-                            "Execution " + execution.getId()
-                                    + " finished with status: "
-                                    + execution.getStatus()
-                    );
-                }
+                executor.execute(due, execution);
+
+                executionRepository.save(execution);
+
+                System.out.println(
+                        "Execution " + execution.getId()
+                                + " finished with status: "
+                                + execution.getStatus()
+                );
+
             } catch (Exception e) {
+                if (execution.getStatus() == ExecutionStatus.PENDING
+                        || execution.getStatus() == ExecutionStatus.RUNNING) {
+                    execution.markFailed();
+                }
+
                 if (running) {
                     System.err.println(
                             "Scheduled run of workflow "
                                     + due.getId()
-                                    + " crashed: "
-                                    + e
+                                    + " crashed: " + e
                     );
                 }
+
+                try {
+                    executionRepository.save(execution);
+
+                } catch (Exception persistenceError) {
+                    System.err.println(
+                            "Failed to persist execution "
+                                    + execution.getId()
+                                    + ": " + persistenceError
+                    );
+                }
+
             } finally {
                 if (running) {
                     try {
@@ -180,12 +213,12 @@ public class WorkflowScheduller {
                         if (running && due.isEnabled()) {
                             queue.add(due);
                         }
+
                     } catch (Exception e) {
                         System.err.println(
                                 "Failed to persist next run for workflow "
                                         + due.getId()
-                                        + ": "
-                                        + e
+                                        + ": " + e
                         );
                     }
                 }
