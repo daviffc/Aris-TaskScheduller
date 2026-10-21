@@ -1,3 +1,4 @@
+
 package com.taskScheduller.domain;
 
 import java.time.Instant;
@@ -8,6 +9,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 public class Workflow {
+
     private final String id;
     private String name;
     private String description;
@@ -17,17 +19,59 @@ public class Workflow {
     private final Instant createdAt;
 
     public Workflow(String name, String description, Trigger trigger) {
-        this.id = UUID.randomUUID().toString();
+        this(
+                UUID.randomUUID().toString(),
+                name,
+                description,
+                trigger,
+                true,
+                Instant.now()
+        );
+    }
+
+    private Workflow(
+            String id,
+            String name,
+            String description,
+            Trigger trigger,
+            boolean enabled,
+            Instant createdAt
+    ) {
+        this.id = Objects.requireNonNull(id, "id must not be null");
         this.name = Objects.requireNonNull(name, "name must not be null");
         this.description = description;
         this.trigger = Objects.requireNonNull(trigger, "trigger must not be null");
         this.steps = new ArrayList<>();
-        this.enabled = true;
-        this.createdAt = Instant.now();
+        this.enabled = enabled;
+        this.createdAt = Objects.requireNonNull(createdAt, "createdAt must not be null");
+    }
+
+    public static Workflow restore(
+            String id,
+            String name,
+            String description,
+            Trigger trigger,
+            boolean enabled,
+            Instant createdAt,
+            List<Step> steps
+    ) {
+        Workflow workflow = new Workflow(
+                id,
+                name,
+                description,
+                trigger,
+                enabled,
+                createdAt
+        );
+
+        Objects.requireNonNull(steps, "steps must not be null")
+                .forEach(workflow::addStep);
+
+        return workflow;
     }
 
     public void addStep(Step step) {
-        steps.add(step);
+        steps.add(Objects.requireNonNull(step, "step must not be null"));
         steps.sort((a, b) -> Integer.compare(a.getOrder(), b.getOrder()));
     }
 
@@ -92,6 +136,4 @@ public class Workflow {
         return "Workflow{id='%s', name='%s', steps=%d, enabled=%s}"
                 .formatted(id, name, steps.size(), enabled);
     }
-
-
 }

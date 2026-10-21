@@ -1,3 +1,4 @@
+
 package com.taskScheduller.service;
 
 import com.taskScheduller.api.CreateWorkflowRequest;
@@ -17,7 +18,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
-
 @Service
 public class WorkflowService {
 
@@ -27,7 +27,13 @@ public class WorkflowService {
     private final ExecutorService executionPool;
     private final WorkflowScheduller scheduler;
 
-    public WorkflowService(WorkflowRepository workflowRepository, WorkflowScheduller scheduler, ExecutionRepository executionRepository, WorkflowExecutor executor, ExecutorService executionPool) {
+    public WorkflowService(
+            WorkflowRepository workflowRepository,
+            WorkflowScheduller scheduler,
+            ExecutionRepository executionRepository,
+            WorkflowExecutor executor,
+            ExecutorService executionPool
+    ) {
         this.workflowRepository = workflowRepository;
         this.scheduler = scheduler;
         this.executionRepository = executionRepository;
@@ -39,50 +45,99 @@ public class WorkflowService {
         Trigger trigger = switch (request.triggerType()) {
             case CRON -> {
                 if (request.intervalSeconds() == null) {
-                    throw new IllegalArgumentException("intervalSeconds is required for CRON triggers");
+                    throw new IllegalArgumentException(
+                            "intervalSeconds is required for CRON triggers"
+                    );
                 }
+
                 yield Trigger.cron(request.intervalSeconds());
             }
+
             case MANUAL -> Trigger.manual();
-            case WEBHOOK -> throw new IllegalArgumentException("WEBHOOK triggers are not supported yet");
+
+            case WEBHOOK -> throw new IllegalArgumentException(
+                    "WEBHOOK triggers are not supported yet"
+            );
         };
 
-        String description = request.description() == null ? "" : request.description();
-        Workflow workflow = new Workflow(request.name(), description, trigger);
+        String description = request.description() == null
+                ? ""
+                : request.description();
+
+        Workflow workflow = new Workflow(
+                request.name(),
+                description,
+                trigger
+        );
 
         int order = 1;
-        for (StepRequest s : request.steps()) {
+
+        for (StepRequest step : request.steps()) {
             workflow.addStep(new Step(
-                    s.name(),
+                    step.name(),
                     order++,
-                    s.actionType(),
-                    s.config() == null ? Map.of() : s.config(),
-                    s.maxRetries() == null ? 0 : s.maxRetries(),
-                    s.retryBackoffMillis() == null ? 1000 : s.retryBackoffMillis()));
+                    step.actionType(),
+                    step.config() == null
+                            ? Map.of()
+                            : step.config(),
+                    step.maxRetries() == null
+                            ? 0
+                            : step.maxRetries(),
+                    step.retryBackoffMillis() == null
+                            ? 1000
+                            : step.retryBackoffMillis()
+            ));
         }
 
         workflowRepository.save(workflow);
+
         if (trigger.getType() == TriggerType.CRON) {
             scheduler.schedule(workflow);
         }
+
         return workflow;
     }
 
-    public Optional<Execution> trigger(String workflowId){
+    public Optional<Execution> trigger(String workflowId) {
         return workflowRepository.findById(workflowId).map(workflow -> {
             Execution execution = new Execution(workflow.getId());
+
             executionRepository.save(execution);
 
-            executionPool.submit(()->{
-                System.out.println("Running execution " + execution.getId()
-                        + " on thread " + Thread.currentThread().getName());
+            executionPool.submit(() -> {
+                System.out.println(
+                        "Running execution " + execution.getId()
+                                + " on thread "
+                                + Thread.currentThread().getName()
+                );
+
                 try {
+                    execution.markRunning();
+                    executionRepository.save(execution);
+
                     executor.execute(workflow, execution);
+
                 } catch (Exception e) {
                     execution.markFailed();
-                    System.err.println("Execution " + execution.getId() + " crashed: " + e);
+
+                    System.err.println(
+                            "Execution " + execution.getId()
+                                    + " crashed: " + e
+                    );
+
+                } finally {
+                    try {
+                        executionRepository.save(execution);
+                    } catch (Exception e) {
+                        System.err.println(
+                                "Failed to persist execution "
+                                        + execution.getId()
+                                        + ": " + e
+                        );
+                    }
                 }
             });
+
             return execution;
         });
     }

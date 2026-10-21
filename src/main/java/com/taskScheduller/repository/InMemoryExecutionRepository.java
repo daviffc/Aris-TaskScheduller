@@ -1,14 +1,13 @@
+
 package com.taskScheduller.repository;
 
 import com.taskScheduller.domain.Execution;
-import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Repository
 public class InMemoryExecutionRepository implements ExecutionRepository {
 
     private final Map<String, Execution> store = new ConcurrentHashMap<>();

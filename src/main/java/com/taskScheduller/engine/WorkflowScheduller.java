@@ -1,43 +1,66 @@
+
 package com.taskScheduller.engine;
 
 import com.taskScheduller.domain.Execution;
 import com.taskScheduller.domain.Workflow;
+import com.taskScheduller.domain.enums.ExecutionStatus;
 import com.taskScheduller.domain.enums.TriggerType;
-import java.time.Duration;
-import java.time.Instant;
-
+import com.taskScheduller.repository.ExecutionRepository;
+import com.taskScheduller.repository.WorkflowRepository;
 import jakarta.annotation.PreDestroy;
-
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import com.taskScheduller.repository.ExecutionRepository;
-
-import java.util.PriorityQueue;
-
+import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.PriorityBlockingQueue;
 
 @Component
 public class WorkflowScheduller {
+
     private final PriorityBlockingQueue<Workflow> queue;
-    private volatile boolean running = false;
-    private Thread worker;
     private final WorkflowExecutor executor;
     private final ExecutionRepository executionRepository;
+    private final WorkflowRepository workflowRepository;
 
+    private volatile boolean running = false;
+    private Thread worker;
 
-    public WorkflowScheduller(WorkflowExecutor executor, ExecutionRepository executionRepository) {
+    @Autowired
+    public WorkflowScheduller(
+            WorkflowExecutor executor,
+            ExecutionRepository executionRepository,
+            WorkflowRepository workflowRepository
+    ) {
         this.queue = new PriorityBlockingQueue<>(
                 11,
-                (a, b) -> a.getTrigger().getNextRunTime().compareTo(b.getTrigger().getNextRunTime())
+                (a, b) -> a.getTrigger().getNextRunTime()
+                        .compareTo(b.getTrigger().getNextRunTime())
         );
+
         this.executor = executor;
         this.executionRepository = executionRepository;
+        this.workflowRepository = workflowRepository;
+    }
+
+    public WorkflowScheduller(
+            WorkflowExecutor executor,
+            ExecutionRepository executionRepository
+    ) {
+        this(executor, executionRepository, null);
     }
 
     public void schedule(Workflow workflow) {
         if (workflow.getTrigger().getType() != TriggerType.CRON) {
-            throw new IllegalArgumentException("cron trigger type must be CRON");
+            throw new IllegalArgumentException(
+                    "Trigger type must be CRON"
+            );
         }
+
+        if (!workflow.isEnabled()) {
+            return;
+        }
+
         queue.add(workflow);
     }
 
@@ -57,49 +80,148 @@ public class WorkflowScheduller {
         return queue.size();
     }
 
-    public void start() {
+    public synchronized void start() {
         if (running) {
             return;
         }
+
         running = true;
-        worker = new Thread(this::runLoop);
+
+        worker = new Thread(
+                this::runLoop,
+                "aris-workflow-scheduler"
+        );
+
         worker.start();
     }
 
     @PreDestroy
     public void stop() {
-        System.out.println("Scheduler stopping...");
-        running = false;
-        if (worker != null) {
-            worker.interrupt();
+        Thread currentWorker;
+
+        synchronized (this) {
+            if (!running) {
+                return;
+            }
+
+            System.out.println("Scheduler stopping...");
+
+            running = false;
+            currentWorker = worker;
+
+            if (currentWorker != null) {
+                currentWorker.interrupt();
+            }
+        }
+
+        if (currentWorker != null
+                && currentWorker != Thread.currentThread()) {
+
+            try {
+                currentWorker.join(30000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            if (currentWorker.isAlive()) {
+                System.err.println(
+                        "Scheduler worker did not stop within 30 seconds"
+                );
+            }
         }
     }
 
     private void runLoop() {
         while (running) {
-            if (isEmpty()) {
+            Workflow next = peekNext();
+
+            if (next == null) {
                 ThreadUtils.sleepQuietly(500);
                 continue;
             }
 
-            Workflow next = peekNext();
-            long millisUntilDue = Duration.between(Instant.now(), next.getTrigger().getNextRunTime()).toMillis();
+            long millisUntilDue = Duration.between(
+                    Instant.now(),
+                    next.getTrigger().getNextRunTime()
+            ).toMillis();
 
-            if (millisUntilDue <= 0) {
-                Workflow due = pollNext();
-                try {
-                    Execution execution = executor.execute(due);
-                    executionRepository.save(execution);
-                    System.out.println("Execution " + execution.getId() + " finished with status: " + execution.getStatus()
-                            + " (stored for this workflow: " + executionRepository.findByWorkflowId(due.getId()).size() + ")");
-                } catch (Exception e) {
-                    System.err.println("Scheduled run of workflow " + due.getId() + " crashed: " + e);
-                } finally {
-                    due.getTrigger().advanceNextRunTime();
-                    queue.add(due);
+            if (millisUntilDue > 0) {
+                ThreadUtils.sleepQuietly(
+                        Math.min(millisUntilDue, 500)
+                );
+                continue;
+            }
+
+            Workflow due = pollNext();
+
+            if (due == null) {
+                continue;
+            }
+
+            Execution execution = new Execution(due.getId());
+
+            try {
+                executionRepository.save(execution);
+
+                execution.markRunning();
+                executionRepository.save(execution);
+
+                executor.execute(due, execution);
+
+                executionRepository.save(execution);
+
+                System.out.println(
+                        "Execution " + execution.getId()
+                                + " finished with status: "
+                                + execution.getStatus()
+                );
+
+            } catch (Exception e) {
+                if (execution.getStatus() == ExecutionStatus.PENDING
+                        || execution.getStatus() == ExecutionStatus.RUNNING) {
+                    execution.markFailed();
                 }
-            } else {
-                ThreadUtils.sleepQuietly(Math.min(millisUntilDue, 500));
+
+                if (running) {
+                    System.err.println(
+                            "Scheduled run of workflow "
+                                    + due.getId()
+                                    + " crashed: " + e
+                    );
+                }
+
+                try {
+                    executionRepository.save(execution);
+
+                } catch (Exception persistenceError) {
+                    System.err.println(
+                            "Failed to persist execution "
+                                    + execution.getId()
+                                    + ": " + persistenceError
+                    );
+                }
+
+            } finally {
+                if (running) {
+                    try {
+                        due.getTrigger().advanceNextRunTime();
+
+                        if (workflowRepository != null) {
+                            workflowRepository.save(due);
+                        }
+
+                        if (running && due.isEnabled()) {
+                            queue.add(due);
+                        }
+
+                    } catch (Exception e) {
+                        System.err.println(
+                                "Failed to persist next run for workflow "
+                                        + due.getId()
+                                        + ": " + e
+                        );
+                    }
+                }
             }
         }
     }

@@ -1,3 +1,4 @@
+
 package com.taskScheduller.domain;
 
 import com.taskScheduller.domain.enums.ExecutionStatus;
@@ -5,10 +6,12 @@ import com.taskScheduller.domain.enums.ExecutionStatus;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class Execution {
+
     private final String id;
     private final String workflowId;
     private volatile ExecutionStatus status;
@@ -17,15 +20,54 @@ public class Execution {
     private final List<ExecutionLog> logs;
 
     public Execution(String workflowId) {
-        this.id = UUID.randomUUID().toString();
-        this.workflowId = workflowId;
-        this.status = ExecutionStatus.PENDING;
-        this.startTime = Instant.now();
-        this.logs = new CopyOnWriteArrayList<>();
+        this(
+                UUID.randomUUID().toString(),
+                workflowId,
+                ExecutionStatus.PENDING,
+                Instant.now(),
+                null,
+                List.of()
+        );
+    }
+
+    private Execution(
+            String id,
+            String workflowId,
+            ExecutionStatus status,
+            Instant startTime,
+            Instant endTime,
+            List<ExecutionLog> logs
+    ) {
+        this.id = Objects.requireNonNull(id, "id must not be null");
+        this.workflowId = Objects.requireNonNull(workflowId, "workflowId must not be null");
+        this.status = Objects.requireNonNull(status, "status must not be null");
+        this.startTime = Objects.requireNonNull(startTime, "startTime must not be null");
+        this.endTime = endTime;
+        this.logs = new CopyOnWriteArrayList<>(
+                Objects.requireNonNull(logs, "logs must not be null")
+        );
+    }
+
+    public static Execution restore(
+            String id,
+            String workflowId,
+            ExecutionStatus status,
+            Instant startTime,
+            Instant endTime,
+            List<ExecutionLog> logs
+    ) {
+        return new Execution(
+                id,
+                workflowId,
+                status,
+                startTime,
+                endTime,
+                logs
+        );
     }
 
     public void addLog(ExecutionLog log) {
-        logs.add(log);
+        logs.add(Objects.requireNonNull(log, "log must not be null"));
     }
 
     public void markRunning() {
