@@ -1,0 +1,42 @@
+
+name: aris-staging
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${STAGING_DB_NAME:?STAGING_DB_NAME is required}
+      POSTGRES_USER: ${STAGING_DB_USER:?STAGING_DB_USER is required}
+      POSTGRES_PASSWORD: ${STAGING_DB_PASSWORD:?STAGING_DB_PASSWORD is required}
+
+    volumes:
+      - staging-postgres-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  app:
+    image: ${ARIS_STAGING_IMAGE:?ARIS_STAGING_IMAGE is required}
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8081:8080"
+
+    environment:
+      DB_URL: "jdbc:postgresql://db:5432/${STAGING_DB_NAME}"
+      DB_USER: ${STAGING_DB_USER}
+      DB_PASSWORD: ${STAGING_DB_PASSWORD}
+      SERVER_PORT: "8080"
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  staging-postgres-data:
