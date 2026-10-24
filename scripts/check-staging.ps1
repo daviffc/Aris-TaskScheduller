@@ -1,3 +1,6 @@
+param(
+    [switch]$TestRollback
+)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -76,6 +79,12 @@ try {
     }
 
     $targetImage = "${registryImage}@${digest}"
+
+if ($TestRollback) {
+    $targetImage = "nginx:alpine"
+    Write-Output "Modo de teste: simulando imagem sem a API do Aris"
+}
+
 
     Write-Output "Imagem publicada: $targetImage"
 
