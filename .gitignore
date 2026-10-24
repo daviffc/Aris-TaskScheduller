@@ -48,3 +48,4 @@ build/
 logs/
 /.env.staging
 !/.env.staging.example
+/.staging-logs/
