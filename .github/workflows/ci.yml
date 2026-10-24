@@ -45,7 +45,6 @@ jobs:
           path: target/surefire-reports/
           if-no-files-found: ignore
 
-
   publish-image:
     name: Publish Docker Image
     runs-on: ubuntu-latest
@@ -81,6 +80,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
           tags: |
             ghcr.io/daviffc/aris-taskscheduller:sha-${{ github.sha }}
             ghcr.io/daviffc/aris-taskscheduller:${{ github.ref == 'refs/heads/main' && 'main' || 'staging' }}
