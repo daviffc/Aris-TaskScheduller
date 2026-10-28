@@ -46,3 +46,6 @@ build/
 !.env.example
 *.log
 logs/
+/.env.staging
+!/.env.staging.example
+/.staging-logs/
