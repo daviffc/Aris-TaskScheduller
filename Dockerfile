@@ -11,7 +11,7 @@ COPY src ./src
 
 RUN mvn -B -ntp -DskipTests clean package
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:24-jre
 
 ARG BUILD_SHA=local
 ENV ARIS_BUILD_SHA=${BUILD_SHA}
