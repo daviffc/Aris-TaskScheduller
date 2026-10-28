@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 
 @Service
 public class WorkflowService {
@@ -104,39 +105,49 @@ public class WorkflowService {
 
             executionRepository.save(execution);
 
-            executionPool.submit(() -> {
-                System.out.println(
-                        "Running execution " + execution.getId()
-                                + " on thread "
-                                + Thread.currentThread().getName()
-                );
-
-                try {
-                    execution.markRunning();
-                    executionRepository.save(execution);
-
-                    executor.execute(workflow, execution);
-
-                } catch (Exception e) {
-                    execution.markFailed();
-
-                    System.err.println(
-                            "Execution " + execution.getId()
-                                    + " crashed: " + e
+            try {
+                executionPool.submit(() -> {
+                    System.out.println(
+                            "Running execution " + execution.getId()
+                                    + " on thread "
+                                    + Thread.currentThread().getName()
                     );
 
-                } finally {
                     try {
+                        execution.markRunning();
                         executionRepository.save(execution);
+
+                        executor.execute(workflow, execution);
+
                     } catch (Exception e) {
+                        execution.markFailed();
+
                         System.err.println(
-                                "Failed to persist execution "
-                                        + execution.getId()
-                                        + ": " + e
+                                "Execution " + execution.getId()
+                                        + " crashed: " + e
                         );
+
+                    } finally {
+                        try {
+                            executionRepository.save(execution);
+                        } catch (Exception e) {
+                            System.err.println(
+                                    "Failed to persist execution "
+                                            + execution.getId()
+                                            + ": " + e
+                            );
+                        }
                     }
-                }
-            });
+                });
+            } catch (RejectedExecutionException e) {
+                execution.markFailed();
+                executionRepository.save(execution);
+
+                throw new RejectedExecutionException(
+                        "Execution capacity reached",
+                        e
+                );
+            }
 
             return execution;
         });
