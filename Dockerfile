@@ -16,9 +16,15 @@ FROM eclipse-temurin:21-jre
 ARG BUILD_SHA=local
 ENV ARIS_BUILD_SHA=${BUILD_SHA}
 
+RUN groupadd --system aris \
+    && useradd --system --gid aris --create-home aris
+
 WORKDIR /app
 
-COPY --from=build /app/target/ArisTaskScheduller-1.0-SNAPSHOT.jar app.jar
+COPY --from=build --chown=aris:aris \
+    /app/target/ArisTaskScheduller-1.0-SNAPSHOT.jar app.jar
+
+USER aris
 
 EXPOSE 8080
 
