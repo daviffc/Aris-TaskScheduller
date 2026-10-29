@@ -11,6 +11,12 @@ import com.taskScheduller.domain.enums.ExecutionStatus;
 import com.taskScheduller.domain.enums.StepStatus;
 import org.junit.jupiter.api.Test;
 
+import com.taskScheduller.domain.enums.ExecutionStatus;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -177,4 +183,103 @@ class WorkflowExecutorTest {
 
         assertThat(execution.getWorkflowId()).isEqualTo(workflow.getId());
     }
+
+
+    @Test
+    void interruptedAction_cancelsExecutionWithoutRetrying() {
+        AtomicInteger calls = new AtomicInteger();
+
+        ActionExecutor interrupting = new ActionExecutor() {
+            @Override
+            public ActionType supports() {
+                return ActionType.LOG_MESSAGE;
+            }
+
+            @Override
+            public void execute(Map<String, String> config)
+                    throws Exception {
+                calls.incrementAndGet();
+                throw new InterruptedException("simulated interruption");
+            }
+        };
+
+        try {
+            Thread.interrupted();
+
+            Execution execution = new WorkflowExecutor(List.of(interrupting))
+                    .execute(workflowWith(
+                            step("interruptible", 1, ActionType.LOG_MESSAGE, 3)
+                    ));
+
+            assertThat(execution.getStatus())
+                    .isEqualTo(ExecutionStatus.CANCELLED);
+            assertThat(execution.getEndTime()).isNotNull();
+            assertThat(calls.get()).isEqualTo(1);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void interruptionAfterFailedAttempt_cancelsWithoutRetrying()
+            throws Exception {
+        CountDownLatch firstAttemptStarted = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<Execution> result = new AtomicReference<>();
+
+        ActionExecutor failing = new ActionExecutor() {
+            @Override
+            public ActionType supports() {
+                return ActionType.LOG_MESSAGE;
+            }
+
+            @Override
+            public void execute(Map<String, String> config) {
+                calls.incrementAndGet();
+                firstAttemptStarted.countDown();
+                throw new IllegalStateException("temporary failure");
+            }
+        };
+
+        Step retryStep = new Step(
+                "interruptible",
+                1,
+                ActionType.LOG_MESSAGE,
+                Map.of(),
+                3,
+                10_000
+        );
+
+        Workflow workflow = workflowWith(retryStep);
+
+        Thread worker = new Thread(
+                () -> result.set(
+                        new WorkflowExecutor(List.of(failing)).execute(workflow)
+                ),
+                "workflow-interruption-test"
+        );
+
+        worker.start();
+
+        try {
+            assertThat(firstAttemptStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+            Thread.sleep(50);
+            worker.interrupt();
+            worker.join(2_000);
+
+            assertThat(worker.isAlive()).isFalse();
+            assertThat(result.get()).isNotNull();
+            assertThat(result.get().getStatus())
+                    .isEqualTo(ExecutionStatus.CANCELLED);
+            assertThat(calls.get()).isEqualTo(1);
+
+        } finally {
+            worker.interrupt();
+            worker.join(2_000);
+        }
+    }
+
 }
